@@ -2714,8 +2714,14 @@ nfs3_opendir_cb(struct rpc_context *rpc, int status, void *command_data,
 
 	assert(rpc->magic == RPC_CONTEXT_MAGIC);
 
-	if (status == RPC_STATUS_ERROR ||
-	    (status == RPC_STATUS_SUCCESS && res->status == NFS3ERR_NOTSUPP)) {
+    if (check_nfs3_error(nfs, status, data, command_data)) {
+		nfs_free_nfsdir(nfsdir);
+		data->continue_data = NULL;
+		free_nfs_cb_data(data);
+		return;
+	}
+
+	if (status == RPC_STATUS_SUCCESS && res->status == NFS3ERR_NOTSUPP) {
 		READDIR3args args;
 
 		args.dir.data.data_len = data->fh.len;
@@ -2735,15 +2741,6 @@ nfs3_opendir_cb(struct rpc_context *rpc, int status, void *command_data,
 			free_nfs_cb_data(data);
 			return;
 		}
-		return;
-	}
-
-	if (status == RPC_STATUS_CANCEL) {
-		data->cb(-EINTR, nfs, "Command was cancelled",
-                         data->private_data);
-		nfs_free_nfsdir(nfsdir);
-		data->continue_data = NULL;
-		free_nfs_cb_data(data);
 		return;
 	}
 
@@ -4669,7 +4666,7 @@ nfs3_pread_async_internal(struct nfs_context *nfs, struct nfsfh *nfsfh,
 	if (nfs->rpc->readahead) {
 		nfsfh->ra.cur_ra = MAX(NFS_BLKSIZE, nfsfh->ra.cur_ra);
 		if (offset >= nfsfh->ra.fh_offset &&
-			offset - NFS_BLKSIZE <= nfsfh->ra.fh_offset + nfsfh->ra.cur_ra) {
+			offset <= nfsfh->ra.fh_offset + nfsfh->ra.cur_ra + NFS_BLKSIZE) {
 			if (nfs->rpc->readahead > nfsfh->ra.cur_ra) {
 				nfsfh->ra.cur_ra <<= 1;
 			}
@@ -4917,19 +4914,12 @@ nfs3_open_cb(struct rpc_context *rpc, int status, void *command_data,
 		nfsfh->is_append = 1;
 	}
 
+    /* init the pagecache */
+    nfs_pagecache_init(nfs, nfsfh);
+
 	/* steal the filehandle */
 	nfsfh->fh = data->fh;
 	data->fh.val = NULL;
-
-	/* init page cache */
-	if (rpc->pagecache) {
-		nfsfh->pagecache.num_entries = rpc->pagecache;
-		nfsfh->pagecache.ttl = rpc->pagecache_ttl;
-		nfsfh->pagecache.entries = malloc(sizeof(struct nfs_pagecache_entry) * nfsfh->pagecache.num_entries);
-		nfs_pagecache_invalidate(nfs, nfsfh);
-		RPC_LOG(nfs->rpc, 2, "init pagecache entries %d pagesize %d\n",
-                        nfsfh->pagecache.num_entries, NFS_BLKSIZE);
-	}
 
 	data->cb(0, nfs, nfsfh, data->private_data);
 	free_nfs_cb_data(data);
