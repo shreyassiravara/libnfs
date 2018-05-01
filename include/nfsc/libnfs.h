@@ -285,6 +285,11 @@ EXTERN  void nfs_pagecache_init(struct nfs_context *nfs,
                                 struct nfsfh *nfsfh);
 
 /*
+ * Free the NFS filehandle.
+ */
+EXTERN void nfs_free_nfsfh(struct nfsfh *nfsfh);
+
+/*
  * MOUNT THE EXPORT
  */
 /*
